@@ -65,7 +65,7 @@ impl OpinionWsClient {
 
     pub async fn send_action(&mut self, value: Value) -> Result<()> {
         let payload = serde_json::to_string(&value)?;
-        self.stream.send(Message::Text(payload)).await?;
+        self.stream.send(Message::Text(payload.into())).await?;
         Ok(())
     }
 
