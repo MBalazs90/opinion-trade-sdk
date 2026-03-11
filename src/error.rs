@@ -6,7 +6,7 @@ pub enum SdkError {
     Http(#[from] reqwest::Error),
 
     #[error("websocket error: {0}")]
-    WebSocket(#[from] tokio_tungstenite::tungstenite::Error),
+    WebSocket(String),
 
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
@@ -25,3 +25,9 @@ pub enum SdkError {
 }
 
 pub type Result<T> = std::result::Result<T, SdkError>;
+
+impl From<tokio_tungstenite::tungstenite::Error> for SdkError {
+    fn from(value: tokio_tungstenite::tungstenite::Error) -> Self {
+        Self::WebSocket(value.to_string())
+    }
+}
