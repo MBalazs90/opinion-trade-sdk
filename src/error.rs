@@ -22,6 +22,15 @@ pub enum SdkError {
 
     #[error("api key required for this endpoint")]
     MissingApiKey,
+
+    #[error("request timed out")]
+    Timeout,
+
+    #[error("connection closed")]
+    ConnectionClosed,
+
+    #[error("validation error: {0}")]
+    Validation(String),
 }
 
 pub type Result<T> = std::result::Result<T, SdkError>;
@@ -75,6 +84,24 @@ mod tests {
         let err = SdkError::from(json_err);
         assert!(matches!(err, SdkError::Json(_)));
         assert!(err.to_string().starts_with("json error:"));
+    }
+
+    #[test]
+    fn display_timeout_error() {
+        let err = SdkError::Timeout;
+        assert_eq!(err.to_string(), "request timed out");
+    }
+
+    #[test]
+    fn display_connection_closed_error() {
+        let err = SdkError::ConnectionClosed;
+        assert_eq!(err.to_string(), "connection closed");
+    }
+
+    #[test]
+    fn display_validation_error() {
+        let err = SdkError::Validation("price out of range".into());
+        assert_eq!(err.to_string(), "validation error: price out of range");
     }
 
     #[test]
