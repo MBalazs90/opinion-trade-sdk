@@ -86,7 +86,7 @@ impl OpinionClient {
         self.get("/market", Some(query)).await
     }
 
-    pub async fn get_market(&self, market_id: i64) -> Result<Market> {
+    pub async fn get_market(&self, market_id: i64) -> Result<DataResult<Market>> {
         self.get(&format!("/market/{market_id}"), Option::<&()>::None)
             .await
     }
@@ -197,13 +197,123 @@ impl OpinionClient {
 
         let envelope: ApiEnvelope<T> = serde_json::from_str(&body)?;
 
-        if envelope.code == 0 {
-            Ok(envelope.result)
-        } else {
-            Err(SdkError::Api {
-                code: envelope.code,
-                msg: envelope.msg,
-            })
+        if envelope.errno != 0 {
+            return Err(SdkError::Api {
+                code: envelope.errno,
+                msg: envelope.errmsg,
+            });
         }
+
+        envelope.result.ok_or_else(|| SdkError::Api {
+            code: envelope.errno,
+            msg: "result was null".into(),
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::MarketQuery;
+
+    #[test]
+    fn builder_defaults() {
+        let client = OpinionClient::builder().build().unwrap();
+        assert_eq!(client.base_url(), DEFAULT_OPENAPI_BASE);
+        assert!(client.api_key.is_none());
+    }
+
+    #[test]
+    fn builder_custom_base_url() {
+        let client = OpinionClient::builder()
+            .base_url("https://custom.api/v1/")
+            .build()
+            .unwrap();
+        // trailing slash should be stripped
+        assert_eq!(client.base_url(), "https://custom.api/v1");
+    }
+
+    #[test]
+    fn builder_with_api_key() {
+        let client = OpinionClient::builder()
+            .api_key("test-key")
+            .build()
+            .unwrap();
+        assert_eq!(client.api_key.as_deref(), Some("test-key"));
+    }
+
+    #[test]
+    fn builder_with_timeout() {
+        // Just verify it doesn't panic
+        let client = OpinionClient::builder()
+            .timeout_secs(30)
+            .build()
+            .unwrap();
+        assert_eq!(client.base_url(), DEFAULT_OPENAPI_BASE);
+    }
+
+    #[test]
+    fn with_api_key_after_build() {
+        let client = OpinionClient::builder()
+            .build()
+            .unwrap()
+            .with_api_key("late-key");
+        assert_eq!(client.api_key.as_deref(), Some("late-key"));
+    }
+
+    #[test]
+    fn build_request_includes_query_params() {
+        let client = OpinionClient::builder().build().unwrap();
+        let query = MarketQuery {
+            page: Some(1),
+            limit: Some(10),
+            ..Default::default()
+        };
+        let req = client
+            .build_request(Method::GET, "/market", Some(&query), false)
+            .unwrap();
+        let url = req.url().to_string();
+        assert!(url.contains("page=1"));
+        assert!(url.contains("limit=10"));
+    }
+
+    #[test]
+    fn build_request_no_query() {
+        let client = OpinionClient::builder().build().unwrap();
+        let req = client
+            .build_request(Method::GET, "/market/1", Option::<&()>::None, false)
+            .unwrap();
+        assert!(req.url().query().is_none());
+    }
+
+    #[test]
+    fn build_request_includes_api_key_header() {
+        let client = OpinionClient::builder()
+            .api_key("my-key")
+            .build()
+            .unwrap();
+        let req = client
+            .build_request(Method::GET, "/order", Option::<&()>::None, true)
+            .unwrap();
+        assert_eq!(req.headers().get("apikey").unwrap(), "my-key");
+    }
+
+    #[test]
+    fn build_request_auth_required_without_key() {
+        let client = OpinionClient::builder().build().unwrap();
+        let result = client.build_request(Method::GET, "/order", Option::<&()>::None, true);
+        assert!(matches!(result.unwrap_err(), SdkError::MissingApiKey));
+    }
+
+    #[test]
+    fn build_request_url_construction() {
+        let client = OpinionClient::builder()
+            .base_url("https://api.test")
+            .build()
+            .unwrap();
+        let req = client
+            .build_request(Method::GET, "/market/42", Option::<&()>::None, false)
+            .unwrap();
+        assert_eq!(req.url().as_str(), "https://api.test/market/42");
     }
 }
