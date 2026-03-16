@@ -1,7 +1,7 @@
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use opinion_trade_sdk::fixed_book::{FixedOrderBook, parse_price_fixed, parse_size_fixed};
 use opinion_trade_sdk::models::{OrderBook, OrderBookLevel};
 use opinion_trade_sdk::orderbook::LocalOrderBook;
-use opinion_trade_sdk::fixed_book::{FixedOrderBook, parse_price_fixed, parse_size_fixed};
 use opinion_trade_sdk::types::Side;
 use serde_json::json;
 
@@ -119,11 +119,23 @@ fn bench_simulate_fill(c: &mut Criterion) {
     let mut group = c.benchmark_group("simulate_fill");
     group.bench_function("LocalOrderBook", |b| {
         let book = LocalOrderBook::from_rest(&ob);
-        b.iter(|| book.simulate_fill(black_box(Side::Buy), black_box(500.0), black_box(Some(0.05))))
+        b.iter(|| {
+            book.simulate_fill(
+                black_box(Side::Buy),
+                black_box(500.0),
+                black_box(Some(0.05)),
+            )
+        })
     });
     group.bench_function("FixedOrderBook", |b| {
         let book = FixedOrderBook::from_rest(&ob);
-        b.iter(|| book.simulate_fill(black_box(Side::Buy), black_box(500.0), black_box(Some(0.05))))
+        b.iter(|| {
+            book.simulate_fill(
+                black_box(Side::Buy),
+                black_box(500.0),
+                black_box(Some(0.05)),
+            )
+        })
     });
     group.finish();
 }
