@@ -207,23 +207,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // === Order builder ===
         println!("\n=== Order Builder ===");
         if let Some(best_ask) = local.best_ask() {
-            let order = OrderBuilder::new(yes_token, Side::Buy, 10.0)
+            let order = OrderBuilder::new(market_id, yes_token, Side::Buy)
                 .price(best_ask)
+                .amount_in_quote_token(10.0)
                 .build()?;
             println!(
-                "  Built limit order: price={} size={} side={:?}",
-                order.price, order.size, order.side
+                "  Built limit order: price={} side={:?}",
+                order.price, order.side
             );
         }
 
         // Market order from book
-        let market_order = OrderBuilder::new(yes_token, Side::Buy, 10.0)
+        let market_order = OrderBuilder::new(market_id, yes_token, Side::Buy)
+            .amount_in_base_token(10.0)
             .max_slippage(0.02)
             .build_market_order(&local)?;
-        println!(
-            "  Built market order: price={} size={}",
-            market_order.price, market_order.size
-        );
+        println!("  Built market order: price={}", market_order.price);
     }
 
     // === Trades (requires market_id) ===

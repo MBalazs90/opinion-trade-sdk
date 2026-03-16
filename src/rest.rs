@@ -9,8 +9,8 @@ use crate::models::{
     PagedList, PriceHistory, PriceHistoryQuery, QuoteToken, Trade, UserTradesQuery,
 };
 use crate::types::{
-    CancelAllOrdersRequest, CancelOrderRequest, CreateOrderRequest, GlobalTradesQuery, Position,
-    PositionsQuery,
+    Balances, CancelAllOrdersRequest, CancelOrderRequest, CancelOrdersBatchRequest,
+    CreateOrderRequest, FeeRates, GlobalTradesQuery, MyTradesQuery, Position, PositionsQuery,
 };
 
 const DEFAULT_OPENAPI_BASE: &str = "https://openapi.opinion.trade/openapi";
@@ -196,6 +196,45 @@ impl OpinionClient {
         self.post_auth("/order/cancel-all", req).await
     }
 
+    /// Cancel multiple orders by their IDs in a single request.
+    pub async fn cancel_orders_batch(&self, req: &CancelOrdersBatchRequest) -> Result<Value> {
+        self.post_auth("/order/cancel-batch", req).await
+    }
+
+    /// Place multiple orders in a single request.
+    pub async fn place_orders_batch(&self, orders: &[CreateOrderRequest]) -> Result<Value> {
+        self.post_auth("/order/batch", orders).await
+    }
+
+    /// Get the authenticated user's balances.
+    pub async fn get_my_balances(&self) -> Result<DataResult<Balances>> {
+        self.get_auth("/balance", Option::<&()>::None).await
+    }
+
+    /// Get the authenticated user's trade history.
+    pub async fn get_my_trades(&self, query: &MyTradesQuery) -> Result<PagedList<Trade>> {
+        self.get_auth("/trade/my", Some(query)).await
+    }
+
+    /// Get a categorical market's data.
+    pub async fn get_categorical_market(&self, market_id: i64) -> Result<DataResult<Market>> {
+        self.get(
+            &format!("/market/categorical/{market_id}"),
+            Option::<&()>::None,
+        )
+        .await
+    }
+
+    /// Get fee rates for a specific token.
+    pub async fn get_fee_rates(&self, token_id: &str) -> Result<FeeRates> {
+        #[derive(Serialize)]
+        struct Query<'a> {
+            token_id: &'a str,
+        }
+        self.get("/token/fee-rates", Some(&Query { token_id }))
+            .await
+    }
+
     async fn get<T, Q>(&self, path: &str, query: Option<&Q>) -> Result<T>
     where
         T: DeserializeOwned,
@@ -298,7 +337,7 @@ impl OpinionClient {
 mod tests {
     use super::*;
     use crate::models::MarketQuery;
-    use crate::types::{CancelOrderRequest, CreateOrderRequest, Side};
+    use crate::types::{CancelOrderRequest, CreateOrderRequest, OrderType, Side};
 
     #[test]
     fn builder_defaults() {
@@ -429,10 +468,13 @@ mod tests {
             .build_post_request(
                 "/order",
                 &CreateOrderRequest {
+                    market_id: 42,
                     token_id: "tok_1".into(),
                     side: Side::Buy,
+                    order_type: OrderType::Limit,
                     price: "0.55".into(),
-                    size: "100".into(),
+                    maker_amount_in_quote_token: Some("100".into()),
+                    maker_amount_in_base_token: None,
                     chain_id: None,
                 },
             )

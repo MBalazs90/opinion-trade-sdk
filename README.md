@@ -58,10 +58,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()?;
 
     // Limit order with automatic price rounding
-    let order = OrderBuilder::new("token_id_here", Side::Buy, 100.0)
+    let order = OrderBuilder::new(42, "token_id_here", Side::Buy)
         .price(0.556)                     // rounded down to 0.55 for buys
-        .tick_size(TickSize::Hundredths)   // 0.01 increments (default)
-        .chain_id("137")
+        .amount_in_quote_token(100.0)     // spend 100 USDT
+        .tick_size(TickSize::Hundredths)  // 0.01 increments (default)
+        .chain_id("56")                   // BNB Chain
         .build()?;
 
     let result = client.create_order(&order).await?;
@@ -85,8 +86,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ob = client.get_orderbook("token_id_here").await?;
     let book = LocalOrderBook::from_rest(&ob);
 
-    let order = OrderBuilder::new("token_id_here", Side::Buy, 50.0)
-        .max_slippage(0.02)  // 2% max slippage
+    let order = OrderBuilder::new(42, "token_id_here", Side::Buy)
+        .amount_in_base_token(50.0)   // buy 50 outcome tokens
+        .max_slippage(0.02)           // 2% max slippage
         .build_market_order(&book)?;
 
     let result = client.create_order(&order).await?;
@@ -207,20 +209,26 @@ async fn main() {
 
 | Method | Endpoint | Auth |
 |--------|----------|------|
-| `get_markets` | GET /market | No |
-| `get_market` | GET /market/{id} | No |
-| `get_quote_tokens` | GET /quoteToken | No |
-| `get_latest_price` | GET /token/latest-price | No |
-| `get_orderbook` | GET /token/orderbook | No |
-| `get_price_history` | GET /token/price-history | No |
-| `get_user_trades` | GET /trade/user/{addr} | No |
-| `get_trades` | GET /trade | No |
+| `get_markets` | GET /market | API key |
+| `get_market` | GET /market/{id} | API key |
+| `get_categorical_market` | GET /market/categorical/{id} | API key |
+| `get_quote_tokens` | GET /quoteToken | API key |
+| `get_latest_price` | GET /token/latest-price | API key |
+| `get_orderbook` | GET /token/orderbook | API key |
+| `get_price_history` | GET /token/price-history | API key |
+| `get_fee_rates` | GET /token/fee-rates | API key |
+| `get_trades` | GET /trade | API key |
+| `get_user_trades` | GET /trade/user/{addr} | API key |
+| `get_my_trades` | GET /trade/my | API key |
 | `get_orders` | GET /order | API key |
 | `get_order_detail` | GET /order/{id} | API key |
-| `get_positions` | GET /position | API key |
 | `create_order` | POST /order | API key |
+| `place_orders_batch` | POST /order/batch | API key |
 | `cancel_order` | POST /order/cancel | API key |
+| `cancel_orders_batch` | POST /order/cancel-batch | API key |
 | `cancel_all_orders` | POST /order/cancel-all | API key |
+| `get_positions` | GET /position | API key |
+| `get_my_balances` | GET /balance | API key |
 
 ## License
 

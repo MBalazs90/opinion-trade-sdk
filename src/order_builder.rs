@@ -1,12 +1,11 @@
 use crate::error::{Result, SdkError};
 use crate::orderbook::LocalOrderBook;
-use crate::types::{CreateOrderRequest, Side};
+use crate::types::{CreateOrderRequest, OrderType, Side};
 
 /// Supported tick sizes for price rounding.
 ///
-/// opinion.trade uses string-based prices (e.g. "0.55"). The tick size determines
-/// the minimum price increment. Default is `Hundredths` (0.01) which is standard
-/// for prediction markets with prices between 0 and 1.
+/// opinion.trade prices have a maximum of 4 decimal places (0.0001 tick size).
+/// Default is `Hundredths` (0.01).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum TickSize {
     /// 0.1 — one decimal place
@@ -16,7 +15,7 @@ pub enum TickSize {
     Hundredths,
     /// 0.001 — three decimal places
     Thousandths,
-    /// 0.0001 — four decimal places
+    /// 0.0001 — four decimal places (maximum precision per API docs)
     TenThousandths,
 }
 
@@ -68,28 +67,42 @@ pub fn format_price(price: f64, tick_size: TickSize) -> String {
     format!("{:.prec$}", price, prec = tick_size.decimals() as usize)
 }
 
+/// Valid price range for opinion.trade prediction markets.
+const MIN_PRICE: f64 = 0.01;
+const MAX_PRICE: f64 = 0.99;
+
 /// Builder for constructing validated `CreateOrderRequest`s.
 ///
-/// Handles price rounding, validation (price in 0..1 range, positive size),
+/// Handles price rounding, validation (price in [0.01, 0.99] range per API docs),
 /// and optional market order price calculation from a local order book.
+///
+/// Amounts can be specified as quote token (USDT budget) or base token (outcome token quantity).
 #[derive(Debug, Clone)]
 pub struct OrderBuilder {
+    market_id: i64,
     token_id: String,
     side: Side,
     price: Option<f64>,
-    size: f64,
+    amount_quote: Option<f64>,
+    amount_base: Option<f64>,
     tick_size: TickSize,
     chain_id: Option<String>,
     max_slippage: Option<f64>,
 }
 
 impl OrderBuilder {
-    pub fn new(token_id: impl Into<String>, side: Side, size: f64) -> Self {
+    /// Create a new order builder.
+    ///
+    /// Specify the amount via `.amount_in_quote_token()` (USDT budget)
+    /// or `.amount_in_base_token()` (outcome token quantity).
+    pub fn new(market_id: i64, token_id: impl Into<String>, side: Side) -> Self {
         Self {
+            market_id,
             token_id: token_id.into(),
             side,
             price: None,
-            size,
+            amount_quote: None,
+            amount_base: None,
             tick_size: TickSize::default(),
             chain_id: None,
             max_slippage: None,
@@ -102,13 +115,29 @@ impl OrderBuilder {
         self
     }
 
+    /// Set the amount in quote token (USDT).
+    /// The number of outcome tokens received = amount / price.
+    pub fn amount_in_quote_token(mut self, amount: f64) -> Self {
+        self.amount_quote = Some(amount);
+        self.amount_base = None;
+        self
+    }
+
+    /// Set the amount in base token (outcome token quantity).
+    /// The USDT cost = amount * price.
+    pub fn amount_in_base_token(mut self, amount: f64) -> Self {
+        self.amount_base = Some(amount);
+        self.amount_quote = None;
+        self
+    }
+
     /// Set the tick size (default: Hundredths / 0.01).
     pub fn tick_size(mut self, tick_size: TickSize) -> Self {
         self.tick_size = tick_size;
         self
     }
 
-    /// Set the chain ID.
+    /// Set the chain ID (default: 56 for BNB Chain).
     pub fn chain_id(mut self, chain_id: impl Into<String>) -> Self {
         self.chain_id = Some(chain_id.into());
         self
@@ -127,34 +156,37 @@ impl OrderBuilder {
             .price
             .ok_or_else(|| SdkError::Validation("price is required for limit orders".into()))?;
 
-        self.validate_common(raw_price)?;
+        self.validate_amount()?;
+        self.validate_price(raw_price)?;
 
         let rounded = round_price(raw_price, self.tick_size, self.side);
-        self.validate_common(rounded)?;
+        self.validate_price(rounded)?;
 
         Ok(CreateOrderRequest {
+            market_id: self.market_id,
             token_id: self.token_id,
             side: self.side,
+            order_type: OrderType::Limit,
             price: format_price(rounded, self.tick_size),
-            size: format!("{}", self.size),
+            maker_amount_in_quote_token: self.amount_quote.map(|a| format!("{a}")),
+            maker_amount_in_base_token: self.amount_base.map(|a| format!("{a}")),
             chain_id: self.chain_id,
         })
     }
 
     /// Build a market order by walking the order book to determine execution price.
     ///
-    /// Calculates the price needed to fill `size` from the book, applies slippage
-    /// tolerance, rounds to tick, and returns a limit order at that price.
+    /// For market orders the price is set to "0" (ignored by server) and the order
+    /// type is `Market`. The amount must be specified.
     pub fn build_market_order(self, book: &LocalOrderBook) -> Result<CreateOrderRequest> {
-        if self.size <= 0.0 {
-            return Err(SdkError::Validation("size must be positive".into()));
-        }
+        self.validate_amount()?;
+        let size = self.effective_size(0.5)?; // dummy price for validation
 
         let market_price = book
-            .calculate_market_price(self.side, self.size)
+            .calculate_market_price(self.side, size)
             .ok_or_else(|| SdkError::Validation("insufficient liquidity in order book".into()))?;
 
-        // Apply slippage buffer
+        // Apply slippage buffer for the limit price ceiling/floor
         let price_with_slippage = if let Some(slippage) = self.max_slippage {
             match self.side {
                 Side::Buy => market_price * (1.0 + slippage),
@@ -165,29 +197,62 @@ impl OrderBuilder {
         };
 
         let rounded = round_price(price_with_slippage, self.tick_size, self.side);
-
-        // Clamp to valid prediction market range
-        let clamped = rounded.clamp(self.tick_size.value(), 1.0 - self.tick_size.value());
+        let clamped = rounded.clamp(MIN_PRICE, MAX_PRICE);
 
         Ok(CreateOrderRequest {
+            market_id: self.market_id,
             token_id: self.token_id,
             side: self.side,
+            order_type: OrderType::Market,
             price: format_price(clamped, self.tick_size),
-            size: format!("{}", self.size),
+            maker_amount_in_quote_token: self.amount_quote.map(|a| format!("{a}")),
+            maker_amount_in_base_token: self.amount_base.map(|a| format!("{a}")),
             chain_id: self.chain_id,
         })
     }
 
-    fn validate_common(&self, price: f64) -> Result<()> {
-        if self.size <= 0.0 {
-            return Err(SdkError::Validation("size must be positive".into()));
+    fn validate_amount(&self) -> Result<()> {
+        if self.amount_quote.is_none() && self.amount_base.is_none() {
+            return Err(SdkError::Validation(
+                "must specify amount via amount_in_quote_token() or amount_in_base_token()".into(),
+            ));
         }
-        if price <= 0.0 || price >= 1.0 {
+        if let Some(a) = self.amount_quote
+            && a <= 0.0
+        {
+            return Err(SdkError::Validation("quote amount must be positive".into()));
+        }
+        if let Some(a) = self.amount_base
+            && a <= 0.0
+        {
+            return Err(SdkError::Validation("base amount must be positive".into()));
+        }
+        Ok(())
+    }
+
+    fn validate_price(&self, price: f64) -> Result<()> {
+        if !(MIN_PRICE..=MAX_PRICE).contains(&price) {
             return Err(SdkError::Validation(format!(
-                "price {price} must be between 0 and 1 (exclusive) for prediction markets"
+                "price {price} must be between {MIN_PRICE} and {MAX_PRICE} (inclusive)"
             )));
         }
         Ok(())
+    }
+
+    /// Get effective size in base tokens for market price calculation.
+    fn effective_size(&self, price_estimate: f64) -> Result<f64> {
+        if let Some(base) = self.amount_base {
+            Ok(base)
+        } else if let Some(quote) = self.amount_quote {
+            if price_estimate <= 0.0 {
+                return Err(SdkError::Validation(
+                    "cannot calculate size without a valid price".into(),
+                ));
+            }
+            Ok(quote / price_estimate)
+        } else {
+            Err(SdkError::Validation("no amount specified".into()))
+        }
     }
 }
 
@@ -257,30 +322,39 @@ mod tests {
     }
 
     #[test]
-    fn order_builder_limit_order() {
-        let req = OrderBuilder::new("tok_1", Side::Buy, 100.0)
+    fn order_builder_limit_order_quote() {
+        let req = OrderBuilder::new(42, "tok_1", Side::Buy)
             .price(0.556)
+            .amount_in_quote_token(100.0)
             .build()
             .unwrap();
+        assert_eq!(req.market_id, 42);
         assert_eq!(req.token_id, "tok_1");
         assert_eq!(req.side, Side::Buy);
+        assert_eq!(req.order_type, OrderType::Limit);
         assert_eq!(req.price, "0.55"); // rounded down for buy
-        assert_eq!(req.size, "100");
+        assert_eq!(req.maker_amount_in_quote_token.as_deref(), Some("100"));
+        assert!(req.maker_amount_in_base_token.is_none());
     }
 
     #[test]
-    fn order_builder_sell_rounds_up() {
-        let req = OrderBuilder::new("tok_1", Side::Sell, 50.0)
+    fn order_builder_limit_order_base() {
+        let req = OrderBuilder::new(42, "tok_1", Side::Sell)
             .price(0.551)
+            .amount_in_base_token(50.0)
             .build()
             .unwrap();
-        assert_eq!(req.price, "0.56");
+        assert_eq!(req.price, "0.56"); // rounded up for sell
+        assert_eq!(req.order_type, OrderType::Limit);
+        assert!(req.maker_amount_in_quote_token.is_none());
+        assert_eq!(req.maker_amount_in_base_token.as_deref(), Some("50"));
     }
 
     #[test]
     fn order_builder_custom_tick_size() {
-        let req = OrderBuilder::new("tok_1", Side::Buy, 100.0)
+        let req = OrderBuilder::new(42, "tok_1", Side::Buy)
             .price(0.5556)
+            .amount_in_quote_token(100.0)
             .tick_size(TickSize::Thousandths)
             .build()
             .unwrap();
@@ -289,57 +363,75 @@ mod tests {
 
     #[test]
     fn order_builder_with_chain_id() {
-        let req = OrderBuilder::new("tok_1", Side::Buy, 100.0)
+        let req = OrderBuilder::new(42, "tok_1", Side::Buy)
             .price(0.55)
-            .chain_id("137")
+            .amount_in_quote_token(100.0)
+            .chain_id("56")
             .build()
             .unwrap();
-        assert_eq!(req.chain_id.as_deref(), Some("137"));
+        assert_eq!(req.chain_id.as_deref(), Some("56"));
     }
 
     #[test]
-    fn order_builder_rejects_zero_size() {
-        let result = OrderBuilder::new("tok_1", Side::Buy, 0.0)
+    fn order_builder_rejects_no_amount() {
+        let result = OrderBuilder::new(42, "tok_1", Side::Buy)
             .price(0.55)
             .build();
         assert!(matches!(result.unwrap_err(), SdkError::Validation(_)));
     }
 
     #[test]
-    fn order_builder_rejects_negative_size() {
-        let result = OrderBuilder::new("tok_1", Side::Buy, -10.0)
+    fn order_builder_rejects_zero_amount() {
+        let result = OrderBuilder::new(42, "tok_1", Side::Buy)
             .price(0.55)
+            .amount_in_quote_token(0.0)
             .build();
         assert!(matches!(result.unwrap_err(), SdkError::Validation(_)));
     }
 
     #[test]
-    fn order_builder_rejects_price_at_zero() {
-        let result = OrderBuilder::new("tok_1", Side::Buy, 100.0)
-            .price(0.0)
+    fn order_builder_rejects_price_below_001() {
+        let result = OrderBuilder::new(42, "tok_1", Side::Buy)
+            .price(0.005)
+            .amount_in_quote_token(100.0)
             .build();
         assert!(matches!(result.unwrap_err(), SdkError::Validation(_)));
     }
 
     #[test]
-    fn order_builder_rejects_price_at_one() {
-        let result = OrderBuilder::new("tok_1", Side::Buy, 100.0)
-            .price(1.0)
+    fn order_builder_rejects_price_above_099() {
+        let result = OrderBuilder::new(42, "tok_1", Side::Buy)
+            .price(0.995)
+            .amount_in_quote_token(100.0)
             .build();
         assert!(matches!(result.unwrap_err(), SdkError::Validation(_)));
     }
 
     #[test]
-    fn order_builder_rejects_price_above_one() {
-        let result = OrderBuilder::new("tok_1", Side::Buy, 100.0)
-            .price(1.5)
-            .build();
-        assert!(matches!(result.unwrap_err(), SdkError::Validation(_)));
+    fn order_builder_accepts_price_001() {
+        let req = OrderBuilder::new(42, "tok_1", Side::Buy)
+            .price(0.01)
+            .amount_in_quote_token(100.0)
+            .build()
+            .unwrap();
+        assert_eq!(req.price, "0.01");
+    }
+
+    #[test]
+    fn order_builder_accepts_price_099() {
+        let req = OrderBuilder::new(42, "tok_1", Side::Sell)
+            .price(0.99)
+            .amount_in_base_token(100.0)
+            .build()
+            .unwrap();
+        assert_eq!(req.price, "0.99");
     }
 
     #[test]
     fn order_builder_no_price_errors() {
-        let result = OrderBuilder::new("tok_1", Side::Buy, 100.0).build();
+        let result = OrderBuilder::new(42, "tok_1", Side::Buy)
+            .amount_in_quote_token(100.0)
+            .build();
         assert!(matches!(result.unwrap_err(), SdkError::Validation(_)));
     }
 
@@ -376,40 +468,42 @@ mod tests {
     #[test]
     fn order_builder_market_buy() {
         let book = make_book();
-        let req = OrderBuilder::new("tok_1", Side::Buy, 50.0)
+        let req = OrderBuilder::new(42, "tok_1", Side::Buy)
+            .amount_in_base_token(50.0)
             .build_market_order(&book)
             .unwrap();
         assert_eq!(req.side, Side::Buy);
-        // Should buy from asks, 50 units at 0.55 -> price 0.55
+        assert_eq!(req.order_type, OrderType::Market);
         assert_eq!(req.price, "0.55");
     }
 
     #[test]
     fn order_builder_market_buy_crossing_levels() {
         let book = make_book();
-        // 150 units: 100 at 0.55 + 50 at 0.58 -> weighted avg
-        let req = OrderBuilder::new("tok_1", Side::Buy, 150.0)
+        let req = OrderBuilder::new(42, "tok_1", Side::Buy)
+            .amount_in_base_token(150.0)
             .build_market_order(&book)
             .unwrap();
-        // avg = (100*0.55 + 50*0.58) / 150 = (55 + 29) / 150 = 0.56
+        // avg = (100*0.55 + 50*0.58) / 150 = 0.56
         assert_eq!(req.price, "0.56");
     }
 
     #[test]
     fn order_builder_market_sell() {
         let book = make_book();
-        let req = OrderBuilder::new("tok_1", Side::Sell, 50.0)
+        let req = OrderBuilder::new(42, "tok_1", Side::Sell)
+            .amount_in_base_token(50.0)
             .build_market_order(&book)
             .unwrap();
         assert_eq!(req.side, Side::Sell);
-        // Should sell into bids, 50 units at 0.50 -> price 0.50
         assert_eq!(req.price, "0.50");
     }
 
     #[test]
     fn order_builder_market_order_with_slippage() {
         let book = make_book();
-        let req = OrderBuilder::new("tok_1", Side::Buy, 50.0)
+        let req = OrderBuilder::new(42, "tok_1", Side::Buy)
+            .amount_in_base_token(50.0)
             .max_slippage(0.02)
             .build_market_order(&book)
             .unwrap();
@@ -420,7 +514,9 @@ mod tests {
     #[test]
     fn order_builder_market_order_insufficient_liquidity() {
         let book = make_book();
-        let result = OrderBuilder::new("tok_1", Side::Buy, 10000.0).build_market_order(&book);
+        let result = OrderBuilder::new(42, "tok_1", Side::Buy)
+            .amount_in_base_token(10000.0)
+            .build_market_order(&book);
         assert!(matches!(result.unwrap_err(), SdkError::Validation(_)));
     }
 }
