@@ -2,8 +2,14 @@
 name = "opinion_trade_sdk"
 version = "0.1.0"
 edition = "2024"
-description = "Unofficial Rust SDK for opinion.trade OpenAPI and WebSocket"
+description = "Unofficial Rust SDK for opinion.trade — REST, WebSocket, CLOB order builder, fixed-point order book, and on-chain operations"
 license = "MIT"
+repository = "https://github.com/MBalazs90/opinion-trade-sdk"
+homepage = "https://github.com/MBalazs90/opinion-trade-sdk"
+documentation = "https://docs.rs/opinion_trade_sdk"
+readme = "README.md"
+keywords = ["opinion-trade", "prediction-market", "trading", "sdk", "websocket"]
+categories = ["api-bindings", "finance"]
 
 [dependencies]
 futures-util = "0.3"
