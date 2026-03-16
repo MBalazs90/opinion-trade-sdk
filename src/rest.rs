@@ -6,7 +6,7 @@ use serde_json::Value;
 use crate::error::{Result, SdkError};
 use crate::models::{
     ApiEnvelope, DataResult, LatestPrice, Market, MarketQuery, Order, OrderBook, OrderQuery,
-    PagedList, PriceHistoryQuery, QuoteToken, Trade, UserTradesQuery,
+    PagedList, PriceHistory, PriceHistoryQuery, QuoteToken, Trade, UserTradesQuery,
 };
 use crate::types::{
     CancelAllOrdersRequest, CancelOrderRequest, CreateOrderRequest, GlobalTradesQuery, Position,
@@ -150,7 +150,8 @@ impl OpinionClient {
             .await
     }
 
-    pub async fn get_price_history(&self, query: &PriceHistoryQuery) -> Result<Value> {
+    /// Fetch price history for a token. Returns typed `PriceHistory` with time-series data.
+    pub async fn get_price_history(&self, query: &PriceHistoryQuery) -> Result<PriceHistory> {
         self.get("/token/price-history", Some(query)).await
     }
 
@@ -176,8 +177,11 @@ impl OpinionClient {
         self.get_auth("/position", Some(query)).await
     }
 
-    pub async fn get_global_trades(&self, query: &GlobalTradesQuery) -> Result<PagedList<Trade>> {
-        self.get("/trade/global", Some(query)).await
+    /// Fetch trades. Requires `market_id` in the query to get results.
+    ///
+    /// Note: The server caps `limit` at 20 regardless of the value requested.
+    pub async fn get_trades(&self, query: &GlobalTradesQuery) -> Result<PagedList<Trade>> {
+        self.get("/trade", Some(query)).await
     }
 
     pub async fn create_order(&self, req: &CreateOrderRequest) -> Result<DataResult<Order>> {

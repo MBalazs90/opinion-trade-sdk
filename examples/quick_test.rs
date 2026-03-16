@@ -88,7 +88,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 end_at: None,
             })
             .await?;
-        println!("  Response type: {}", history_summary(&history));
+        println!("  {} data points", history.history.len());
+        for p in history.history.iter().take(3) {
+            println!("    price={} time={}", p.price, p.timestamp);
+        }
     }
 
     // === WebSocket ===
@@ -175,14 +178,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\n=== All tests passed! ===");
     Ok(())
-}
-
-fn history_summary(v: &serde_json::Value) -> String {
-    if let Some(arr) = v.as_array() {
-        format!("array with {} entries", arr.len())
-    } else if let Some(obj) = v.as_object() {
-        format!("object with keys: {:?}", obj.keys().collect::<Vec<_>>())
-    } else {
-        format!("{}", v)
-    }
 }

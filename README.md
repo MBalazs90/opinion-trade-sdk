@@ -214,7 +214,7 @@ async fn main() {
 | `get_orderbook` | GET /token/orderbook | No |
 | `get_price_history` | GET /token/price-history | No |
 | `get_user_trades` | GET /trade/user/{addr} | No |
-| `get_global_trades` | GET /trade/global | No |
+| `get_trades` | GET /trade | No |
 | `get_orders` | GET /order | API key |
 | `get_order_detail` | GET /order/{id} | API key |
 | `get_positions` | GET /position | API key |

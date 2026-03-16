@@ -157,6 +157,23 @@ pub struct PriceHistoryQuery {
     pub end_at: Option<i64>,
 }
 
+/// A price history response containing time-series data points.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PriceHistory {
+    pub history: Vec<PriceHistoryPoint>,
+}
+
+/// A single price point in a price history time-series.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PriceHistoryPoint {
+    /// Price as a string (e.g. "0.52").
+    #[serde(rename = "p")]
+    pub price: String,
+    /// Unix timestamp.
+    #[serde(rename = "t")]
+    pub timestamp: i64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -394,5 +411,27 @@ mod tests {
         assert_eq!(v["interval"], "1h");
         assert_eq!(v["start_at"], 1000);
         assert_eq!(v["end_at"], 2000);
+    }
+
+    #[test]
+    fn deserialize_price_history() {
+        let json = json!({
+            "history": [
+                {"p": "0.52", "t": 1773658800},
+                {"p": "0.55", "t": 1773655200}
+            ]
+        });
+        let ph: PriceHistory = serde_json::from_value(json).unwrap();
+        assert_eq!(ph.history.len(), 2);
+        assert_eq!(ph.history[0].price, "0.52");
+        assert_eq!(ph.history[0].timestamp, 1773658800);
+        assert_eq!(ph.history[1].price, "0.55");
+    }
+
+    #[test]
+    fn deserialize_price_history_empty() {
+        let json = json!({"history": []});
+        let ph: PriceHistory = serde_json::from_value(json).unwrap();
+        assert!(ph.history.is_empty());
     }
 }
