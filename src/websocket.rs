@@ -30,12 +30,17 @@ pub enum WsEvent {
         channel: String,
         market_id: Option<i64>,
     },
-    /// Order book snapshot or delta.
+    /// Order book depth diff (channel: `market.depth.diff`).
     OrderBook { market_id: Option<i64>, data: Value },
-    /// Trade event.
+    /// Last trade event (channel: `market.last.trade`).
     Trade { market_id: Option<i64>, data: Value },
-    /// Price update event.
+    /// Price update (channel: `market.last.price`).
     Price { market_id: Option<i64>, data: Value },
+    /// Order status update (channel: `trade.order.update`).
+    /// Includes orderNew, orderFill, orderCancel, orderConfirm events.
+    OrderUpdate { market_id: Option<i64>, data: Value },
+    /// On-chain trade execution confirmation (channel: `trade.record.new`).
+    TradeRecord { market_id: Option<i64>, data: Value },
     /// Any event that doesn't match known types.
     Raw(Value),
     /// Connection was closed.
@@ -73,25 +78,49 @@ fn parse_ws_event(value: Value) -> WsEvent {
         .unwrap_or("")
         .to_uppercase();
 
+    // Channel from explicit field or from msgType (used in push messages).
     let channel = value
         .get("channel")
+        .or_else(|| value.get("msgType"))
         .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_lowercase();
+        .unwrap_or("");
 
     let market_id = value.get("marketId").and_then(|v| v.as_i64());
 
     match action.as_str() {
         "HEARTBEAT" => WsEvent::Heartbeat,
         "SUBSCRIBED" | "SUBSCRIBE_OK" => WsEvent::Subscribed {
-            channel: channel.clone(),
+            channel: channel.to_string(),
             market_id,
         },
         "UNSUBSCRIBED" | "UNSUBSCRIBE_OK" => WsEvent::Unsubscribed {
-            channel: channel.clone(),
+            channel: channel.to_string(),
             market_id,
         },
-        _ => match channel.as_str() {
+        _ => match channel {
+            // Market channels (official names from docs)
+            "market.depth.diff" => WsEvent::OrderBook {
+                market_id,
+                data: value,
+            },
+            "market.last.trade" => WsEvent::Trade {
+                market_id,
+                data: value,
+            },
+            "market.last.price" => WsEvent::Price {
+                market_id,
+                data: value,
+            },
+            // User channels
+            "trade.order.update" => WsEvent::OrderUpdate {
+                market_id,
+                data: value,
+            },
+            "trade.record.new" => WsEvent::TradeRecord {
+                market_id,
+                data: value,
+            },
+            // Legacy/fallback names for backward compatibility
             "orderbook" | "order_book" => WsEvent::OrderBook {
                 market_id,
                 data: value,
@@ -794,6 +823,50 @@ mod tests {
         let v = json!({"action": "SUBSCRIBE_OK", "channel": "price", "marketId": 1});
         let evt = parse_ws_event(v);
         assert!(matches!(evt, WsEvent::Subscribed { .. }));
+    }
+
+    // --- Official channel names from docs ---
+
+    #[test]
+    fn parse_market_depth_diff() {
+        let v = json!({"msgType": "market.depth.diff", "marketId": 42, "side": "bids", "price": "0.55", "size": "100"});
+        let evt = parse_ws_event(v);
+        assert!(matches!(evt, WsEvent::OrderBook { .. }));
+    }
+
+    #[test]
+    fn parse_market_last_price() {
+        let v = json!({"msgType": "market.last.price", "marketId": 42, "price": "0.60"});
+        let evt = parse_ws_event(v);
+        assert!(matches!(evt, WsEvent::Price { .. }));
+    }
+
+    #[test]
+    fn parse_market_last_trade() {
+        let v = json!({"msgType": "market.last.trade", "marketId": 42, "side": "Buy", "price": "0.55", "shares": "10"});
+        let evt = parse_ws_event(v);
+        assert!(matches!(evt, WsEvent::Trade { .. }));
+    }
+
+    #[test]
+    fn parse_trade_order_update() {
+        let v = json!({"msgType": "trade.order.update", "marketId": 42, "orderUpdateType": "orderFill", "orderId": "123"});
+        let evt = parse_ws_event(v);
+        assert!(matches!(evt, WsEvent::OrderUpdate { .. }));
+    }
+
+    #[test]
+    fn parse_trade_record_new() {
+        let v = json!({"msgType": "trade.record.new", "marketId": 42, "txHash": "0xabc", "side": "Buy"});
+        let evt = parse_ws_event(v);
+        assert!(matches!(evt, WsEvent::TradeRecord { .. }));
+    }
+
+    #[test]
+    fn parse_channel_field_also_works() {
+        let v = json!({"channel": "market.depth.diff", "marketId": 10});
+        let evt = parse_ws_event(v);
+        assert!(matches!(evt, WsEvent::OrderBook { .. }));
     }
 
     #[test]
