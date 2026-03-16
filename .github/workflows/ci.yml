@@ -33,7 +33,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy (default features)
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --lib --tests --benches -- -D warnings
 
       - name: Clippy (all features incl. chain)
         run: cargo clippy --all-targets --all-features -- -D warnings
