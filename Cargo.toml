@@ -1,6 +1,6 @@
 [package]
 name = "opinion_trade_sdk"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Unofficial Rust SDK for opinion.trade — REST, WebSocket, CLOB order builder, fixed-point order book, and on-chain operations"
 license = "MIT"
