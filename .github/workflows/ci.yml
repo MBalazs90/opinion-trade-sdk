@@ -2,30 +2,118 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  test:
+    name: Test
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
 
-      - name: Cache Cargo artifacts
-        uses: Swatinem/rust-cache@v2
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-      - name: Clippy
+      - name: Clippy (default features)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Clippy (all features incl. chain)
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Test
+      - name: Test (default features)
+        run: cargo test --all-targets
+
+      - name: Test (all features incl. chain)
         run: cargo test --all-features --all-targets
+
+      - name: Build examples (default)
+        run: |
+          cargo build --example check_balance_api
+          cargo build --example investigate
+          cargo build --example live_test
+          cargo build --example probe_endpoints
+          cargo build --example probe2
+          cargo build --example quick_test
+          cargo build --example rest_and_ws
+
+      - name: Build examples (chain feature)
+        run: cargo build --features chain --example check_balance
+
+      - name: Build documentation
+        run: cargo doc --no-deps --all-features
+
+  bench:
+    name: Benchmarks
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build benchmarks
+        run: cargo bench --no-run
+
+      - name: Run benchmarks
+        run: cargo bench -- --output-format bencher 2>&1 | tee bench-output.txt
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: bench-output.txt
+
+  security:
+    name: Security audit
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Run security audit
+        run: cargo audit
+
+  msrv:
+    name: Minimum supported Rust version
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Check with default features
+        run: cargo check
+
+      - name: Check with all features
+        run: cargo check --all-features
