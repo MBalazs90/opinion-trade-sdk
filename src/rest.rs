@@ -207,8 +207,15 @@ impl OpinionClient {
     }
 
     /// Get the authenticated user's balances.
-    pub async fn get_my_balances(&self) -> Result<DataResult<Balances>> {
-        self.get_auth("/balance", Option::<&()>::None).await
+    ///
+    /// Requires `chain_id` (e.g. "56" for BNB Chain).
+    pub async fn get_my_balances(&self, chain_id: &str) -> Result<Balances> {
+        #[derive(Serialize)]
+        struct Query<'a> {
+            chain_id: &'a str,
+        }
+        self.get_auth("/user/balance", Some(&Query { chain_id }))
+            .await
     }
 
     /// Get the authenticated user's trade history.

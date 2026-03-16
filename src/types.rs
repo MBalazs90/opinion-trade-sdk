@@ -178,15 +178,32 @@ pub struct MyTradesQuery {
     pub market_id: Option<i64>,
 }
 
-/// User balance information.
+/// User balance information returned by `/user/balance`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Balances {
+    #[serde(rename = "walletAddress")]
+    pub wallet_address: Option<String>,
+    #[serde(rename = "multiSignAddress")]
+    pub multi_sign_address: Option<String>,
+    #[serde(rename = "chainId")]
+    pub chain_id: Option<String>,
+    #[serde(default)]
     pub balances: Vec<Balance>,
 }
 
-/// A single balance entry.
+/// A single token balance entry.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Balance {
+    #[serde(rename = "quoteToken")]
+    pub quote_token: Option<String>,
+    #[serde(rename = "tokenDecimals")]
+    pub token_decimals: Option<u32>,
+    #[serde(rename = "totalBalance")]
+    pub total_balance: Option<String>,
+    #[serde(rename = "availableBalance")]
+    pub available_balance: Option<String>,
+    #[serde(rename = "frozenBalance")]
+    pub frozen_balance: Option<String>,
     #[serde(flatten)]
     pub extra: Value,
 }
