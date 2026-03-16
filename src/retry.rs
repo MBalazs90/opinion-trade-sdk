@@ -19,6 +19,8 @@ pub fn is_retryable(err: &SdkError) -> bool {
         | SdkError::Api { .. }
         | SdkError::MissingApiKey
         | SdkError::Validation(_) => false,
+        #[cfg(feature = "chain")]
+        SdkError::Chain(_) | SdkError::MissingPrivateKey => false,
     }
 }
 

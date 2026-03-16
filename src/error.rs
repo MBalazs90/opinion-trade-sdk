@@ -31,6 +31,14 @@ pub enum SdkError {
 
     #[error("validation error: {0}")]
     Validation(String),
+
+    #[cfg(feature = "chain")]
+    #[error("on-chain error: {0}")]
+    Chain(String),
+
+    #[cfg(feature = "chain")]
+    #[error("missing private key (set OPINION_PRIVATE_KEY env var)")]
+    MissingPrivateKey,
 }
 
 pub type Result<T> = std::result::Result<T, SdkError>;

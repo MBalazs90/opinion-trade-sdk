@@ -1,4 +1,8 @@
 pub mod buffer_pool;
+#[cfg(feature = "chain")]
+pub mod chain;
+#[cfg(feature = "chain")]
+pub mod chain_abi;
 pub mod error;
 pub mod fixed_book;
 pub mod models;
@@ -11,6 +15,10 @@ pub mod types;
 pub mod websocket;
 
 pub use crate::buffer_pool::BufferPool;
+#[cfg(feature = "chain")]
+pub use crate::chain::{
+    OnChainClient, OnChainClientBuilder, TradingStatus, TxResult, format_amount_18, parse_amount_18,
+};
 pub use crate::error::SdkError;
 pub use crate::fixed_book::FixedOrderBook;
 pub use crate::models::*;
