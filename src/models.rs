@@ -119,10 +119,24 @@ pub struct MarketQuery {
     pub page: Option<u32>,
     pub limit: Option<u32>,
     pub status: Option<String>,
+    /// Market type: 0=Binary, 1=Categorical.
+    #[serde(rename = "marketType")]
+    pub market_type: Option<u32>,
     #[serde(rename = "chainId")]
     pub chain_id: Option<String>,
     #[serde(rename = "sortBy")]
     pub sort_by: Option<u32>,
+}
+
+/// Query parameters for fetching quote tokens.
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct QuoteTokenQuery {
+    pub page: Option<u32>,
+    pub limit: Option<u32>,
+    #[serde(rename = "quoteTokenName")]
+    pub quote_token_name: Option<String>,
+    #[serde(rename = "chainId")]
+    pub chain_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -363,6 +377,7 @@ mod tests {
             page: Some(2),
             limit: Some(25),
             status: Some("activated".into()),
+            market_type: Some(0),
             chain_id: Some("137".into()),
             sort_by: Some(1),
         };

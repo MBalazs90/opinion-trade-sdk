@@ -211,8 +211,10 @@ async fn main() {
 |--------|----------|------|
 | `get_markets` | GET /market | API key |
 | `get_market` | GET /market/{id} | API key |
+| `get_market_by_slug` | GET /market/slug/{slug} | API key |
 | `get_categorical_market` | GET /market/categorical/{id} | API key |
 | `get_quote_tokens` | GET /quoteToken | API key |
+| `get_quote_tokens_filtered` | GET /quoteToken (with filters) | API key |
 | `get_latest_price` | GET /token/latest-price | API key |
 | `get_orderbook` | GET /token/orderbook | API key |
 | `get_price_history` | GET /token/price-history | API key |
@@ -227,8 +229,8 @@ async fn main() {
 | `cancel_order` | POST /order/cancel | API key |
 | `cancel_orders_batch` | POST /order/cancel-batch | API key |
 | `cancel_all_orders` | POST /order/cancel-all | API key |
-| `get_positions` | GET /position | API key |
-| `get_my_balances` | GET /balance | API key |
+| `get_positions` | GET /positions/user/{addr} | API key |
+| `get_my_balances` | GET /user/balance | API key |
 
 ## License
 

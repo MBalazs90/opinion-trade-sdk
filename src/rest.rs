@@ -6,7 +6,8 @@ use serde_json::Value;
 use crate::error::{Result, SdkError};
 use crate::models::{
     ApiEnvelope, DataResult, LatestPrice, Market, MarketQuery, Order, OrderBook, OrderQuery,
-    PagedList, PriceHistory, PriceHistoryQuery, QuoteToken, Trade, UserTradesQuery,
+    PagedList, PriceHistory, PriceHistoryQuery, QuoteToken, QuoteTokenQuery, Trade,
+    UserTradesQuery,
 };
 use crate::types::{
     Balances, CancelAllOrdersRequest, CancelOrderRequest, CancelOrdersBatchRequest,
@@ -128,6 +129,21 @@ impl OpinionClient {
             .await
     }
 
+    /// Get a market by its URL slug.
+    pub async fn get_market_by_slug(&self, slug: &str) -> Result<DataResult<Market>> {
+        self.get(&format!("/market/slug/{slug}"), Option::<&()>::None)
+            .await
+    }
+
+    /// Get quote tokens with optional filters.
+    pub async fn get_quote_tokens_filtered(
+        &self,
+        query: &QuoteTokenQuery,
+    ) -> Result<PagedList<QuoteToken>> {
+        self.get("/quoteToken", Some(query)).await
+    }
+
+    /// Get all quote tokens (no filters).
     pub async fn get_quote_tokens(&self) -> Result<PagedList<QuoteToken>> {
         self.get("/quoteToken", Option::<&()>::None).await
     }
@@ -173,8 +189,16 @@ impl OpinionClient {
             .await
     }
 
-    pub async fn get_positions(&self, query: &PositionsQuery) -> Result<PagedList<Position>> {
-        self.get_auth("/position", Some(query)).await
+    /// Get positions for a wallet address.
+    ///
+    /// Note: This is the OpenAPI endpoint `/positions/user/{walletAddress}`.
+    pub async fn get_positions(
+        &self,
+        wallet_address: &str,
+        query: &PositionsQuery,
+    ) -> Result<PagedList<Position>> {
+        self.get(&format!("/positions/user/{wallet_address}"), Some(query))
+            .await
     }
 
     /// Fetch trades. Requires `market_id` in the query to get results.
