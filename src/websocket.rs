@@ -556,73 +556,120 @@ impl BookApplier {
     }
 
     fn apply_orderbook_data(&mut self, data: &Value) {
-        // Handle array-of-deltas format: {"bids": [...], "asks": [...]}
         if let Some(bids) = data.get("bids").and_then(|v| v.as_array()) {
             for bid in bids {
-                if let (Some(price), Some(size)) = (
-                    bid.get("price")
-                        .or_else(|| bid.get(0))
-                        .and_then(|v| v.as_str().or_else(|| v.as_f64().map(|_| "")))
-                        .and_then(|s| {
-                            if s.is_empty() {
-                                bid.get("price")
-                                    .or_else(|| bid.get(0))
-                                    .and_then(|v| v.as_f64())
-                            } else {
-                                s.parse::<f64>().ok()
-                            }
-                        }),
-                    bid.get("size")
-                        .or_else(|| bid.get(1))
-                        .and_then(|v| v.as_str().or_else(|| v.as_f64().map(|_| "")))
-                        .and_then(|s| {
-                            if s.is_empty() {
-                                bid.get("size")
-                                    .or_else(|| bid.get(1))
-                                    .and_then(|v| v.as_f64())
-                            } else {
-                                s.parse::<f64>().ok()
-                            }
-                        }),
-                ) {
+                if let Some((price, size)) = extract_price_size(bid) {
                     self.book.apply_delta("buy", price, size);
                 }
             }
         }
-
         if let Some(asks) = data.get("asks").and_then(|v| v.as_array()) {
             for ask in asks {
-                if let (Some(price), Some(size)) = (
-                    ask.get("price")
-                        .or_else(|| ask.get(0))
-                        .and_then(|v| v.as_str().or_else(|| v.as_f64().map(|_| "")))
-                        .and_then(|s| {
-                            if s.is_empty() {
-                                ask.get("price")
-                                    .or_else(|| ask.get(0))
-                                    .and_then(|v| v.as_f64())
-                            } else {
-                                s.parse::<f64>().ok()
-                            }
-                        }),
-                    ask.get("size")
-                        .or_else(|| ask.get(1))
-                        .and_then(|v| v.as_str().or_else(|| v.as_f64().map(|_| "")))
-                        .and_then(|s| {
-                            if s.is_empty() {
-                                ask.get("size")
-                                    .or_else(|| ask.get(1))
-                                    .and_then(|v| v.as_f64())
-                            } else {
-                                s.parse::<f64>().ok()
-                            }
-                        }),
-                ) {
+                if let Some((price, size)) = extract_price_size(ask) {
                     self.book.apply_delta("sell", price, size);
                 }
             }
         }
     }
+}
+
+/// Extract price and size from a JSON order book level entry.
+/// Handles both string ("0.55") and numeric (0.55) formats,
+/// and both object ({"price": ..., "size": ...}) and array ([price, size]) layouts.
+#[inline]
+fn extract_price_size(entry: &Value) -> Option<(f64, f64)> {
+    let price = entry.get("price").or_else(|| entry.get(0)).and_then(|v| {
+        v.as_f64()
+            .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+    })?;
+    let size = entry.get("size").or_else(|| entry.get(1)).and_then(|v| {
+        v.as_f64()
+            .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+    })?;
+    Some((price, size))
+}
+
+/// High-performance book applier using `FixedOrderBook`.
+///
+/// Uses fixed-point integer parsing to avoid f64 conversions on the hot path.
+pub struct FastBookApplier {
+    book: crate::fixed_book::FixedOrderBook,
+}
+
+impl FastBookApplier {
+    pub fn new(book: crate::fixed_book::FixedOrderBook) -> Self {
+        Self { book }
+    }
+
+    pub fn book(&self) -> &crate::fixed_book::FixedOrderBook {
+        &self.book
+    }
+
+    pub fn book_mut(&mut self) -> &mut crate::fixed_book::FixedOrderBook {
+        &mut self.book
+    }
+
+    /// Apply a WsEvent using fixed-point parsing. Returns true if applied.
+    pub fn apply_event(&mut self, event: &WsEvent) -> bool {
+        match event {
+            WsEvent::OrderBook { data, .. } => {
+                self.apply_orderbook_data(data);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn apply_orderbook_data(&mut self, data: &Value) {
+        use crate::fixed_book::{parse_price_fixed, parse_size_fixed};
+
+        if let Some(bids) = data.get("bids").and_then(|v| v.as_array()) {
+            for bid in bids {
+                if let Some((price, size)) = extract_price_size_fixed(bid) {
+                    self.book.apply_delta_fixed(0, price, size);
+                } else if let Some((price, size)) = extract_price_size(bid) {
+                    // Fallback for numeric-only formats
+                    self.book.apply_delta_fixed(
+                        0,
+                        parse_price_fixed(&format!("{price}")).unwrap_or(0),
+                        parse_size_fixed(&format!("{size}")).unwrap_or(0),
+                    );
+                }
+            }
+        }
+        if let Some(asks) = data.get("asks").and_then(|v| v.as_array()) {
+            for ask in asks {
+                if let Some((price, size)) = extract_price_size_fixed(ask) {
+                    self.book.apply_delta_fixed(1, price, size);
+                } else if let Some((price, size)) = extract_price_size(ask) {
+                    self.book.apply_delta_fixed(
+                        1,
+                        parse_price_fixed(&format!("{price}")).unwrap_or(0),
+                        parse_size_fixed(&format!("{size}")).unwrap_or(0),
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Extract price and size as fixed-point directly from string values (zero f64 conversion).
+#[inline]
+fn extract_price_size_fixed(entry: &Value) -> Option<(u32, i64)> {
+    use crate::fixed_book::{parse_price_fixed, parse_size_fixed};
+
+    let price_str = entry
+        .get("price")
+        .or_else(|| entry.get(0))
+        .and_then(|v| v.as_str())?;
+    let size_str = entry
+        .get("size")
+        .or_else(|| entry.get(1))
+        .and_then(|v| v.as_str())?;
+
+    let price = parse_price_fixed(price_str)?;
+    let size = parse_size_fixed(size_str)?;
+    Some((price, size))
 }
 
 /// A mock WebSocket event source for testing.
@@ -916,6 +963,79 @@ mod tests {
 
         assert_eq!(applier.book().bid_depth(), 1);
         assert_eq!(applier.book().ask_depth(), 1);
+    }
+
+    #[test]
+    fn fast_book_applier_applies_string_prices() {
+        let book = crate::fixed_book::FixedOrderBook::new("tok_1");
+        let mut applier = FastBookApplier::new(book);
+
+        let event = WsEvent::OrderBook {
+            market_id: Some(42),
+            data: json!({
+                "bids": [{"price": "0.50", "size": "100"}],
+                "asks": [{"price": "0.55", "size": "200"}]
+            }),
+        };
+
+        assert!(applier.apply_event(&event));
+        assert_eq!(applier.book().best_bid_fixed(), Some(5000));
+        assert_eq!(applier.book().best_ask_fixed(), Some(5500));
+    }
+
+    #[test]
+    fn fast_book_applier_applies_numeric_prices() {
+        let book = crate::fixed_book::FixedOrderBook::new("tok_1");
+        let mut applier = FastBookApplier::new(book);
+
+        let event = WsEvent::OrderBook {
+            market_id: None,
+            data: json!({
+                "bids": [{"price": 0.50, "size": 100.0}],
+                "asks": [{"price": 0.55, "size": 200.0}]
+            }),
+        };
+
+        assert!(applier.apply_event(&event));
+        assert!((applier.book().best_bid().unwrap() - 0.50).abs() < 1e-4);
+    }
+
+    #[test]
+    fn fast_book_applier_removes_zero_size() {
+        let book = crate::fixed_book::FixedOrderBook::new("tok_1");
+        let mut applier = FastBookApplier::new(book);
+
+        applier.apply_event(&WsEvent::OrderBook {
+            market_id: None,
+            data: json!({"bids": [{"price": "0.50", "size": "100"}], "asks": []}),
+        });
+        assert_eq!(applier.book().bid_depth(), 1);
+
+        applier.apply_event(&WsEvent::OrderBook {
+            market_id: None,
+            data: json!({"bids": [{"price": "0.50", "size": "0"}], "asks": []}),
+        });
+        assert_eq!(applier.book().bid_depth(), 0);
+    }
+
+    #[test]
+    fn extract_price_size_helper() {
+        let entry = json!({"price": "0.55", "size": "100"});
+        let (p, s) = extract_price_size(&entry).unwrap();
+        assert!((p - 0.55).abs() < f64::EPSILON);
+        assert!((s - 100.0).abs() < f64::EPSILON);
+
+        let entry = json!({"price": 0.55, "size": 100.0});
+        let (p, _s) = extract_price_size(&entry).unwrap();
+        assert!((p - 0.55).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn extract_price_size_fixed_helper() {
+        let entry = json!({"price": "0.55", "size": "100"});
+        let (p, s) = extract_price_size_fixed(&entry).unwrap();
+        assert_eq!(p, 5500);
+        assert_eq!(s, 100_000_000);
     }
 
     #[test]

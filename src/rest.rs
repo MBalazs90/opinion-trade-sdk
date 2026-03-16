@@ -110,6 +110,15 @@ impl OpinionClient {
         &self.base_url
     }
 
+    /// Pre-warm the HTTP connection pool by issuing a lightweight request.
+    ///
+    /// Call this after building the client to avoid cold-start latency on the
+    /// first real request. Establishes TCP + TLS to the API server.
+    pub async fn warm_up(&self) -> Result<()> {
+        let _ = self.get_quote_tokens().await;
+        Ok(())
+    }
+
     pub async fn get_markets(&self, query: &MarketQuery) -> Result<PagedList<Market>> {
         self.get("/market", Some(query)).await
     }

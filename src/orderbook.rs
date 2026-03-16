@@ -152,6 +152,16 @@ impl LocalOrderBook {
         self.asks.iter().map(|(k, &v)| (k.0, v)).collect()
     }
 
+    /// Zero-alloc bid iterator (descending price order).
+    pub fn bids_iter(&self) -> impl Iterator<Item = (f64, f64)> + '_ {
+        self.bids.iter().map(|(k, &v)| (-k.0, v))
+    }
+
+    /// Zero-alloc ask iterator (ascending price order).
+    pub fn asks_iter(&self) -> impl Iterator<Item = (f64, f64)> + '_ {
+        self.asks.iter().map(|(k, &v)| (k.0, v))
+    }
+
     /// Total size across all bid levels.
     pub fn total_bid_size(&self) -> f64 {
         self.bids.values().sum()
@@ -204,16 +214,16 @@ impl LocalOrderBook {
     /// For Sell: walks the bid side (highest first).
     /// Returns `None` if insufficient liquidity.
     pub fn calculate_market_price(&self, side: Side, size: f64) -> Option<f64> {
-        let levels: Vec<(f64, f64)> = match side {
-            Side::Buy => self.asks(),
-            Side::Sell => self.bids(),
-        };
-
         let mut remaining = size;
         let mut total_cost = 0.0;
 
-        for (price, level_size) in &levels {
-            let fill = remaining.min(*level_size);
+        let iter: Box<dyn Iterator<Item = (f64, f64)> + '_> = match side {
+            Side::Buy => Box::new(self.asks_iter()),
+            Side::Sell => Box::new(self.bids_iter()),
+        };
+
+        for (price, level_size) in iter {
+            let fill = remaining.min(level_size);
             total_cost += fill * price;
             remaining -= fill;
             if remaining <= 0.0 {
@@ -260,22 +270,19 @@ impl LocalOrderBook {
             },
         };
 
-        let levels: Vec<(f64, f64)> = match side {
-            Side::Buy => self.asks(),
-            Side::Sell => self.bids(),
+        let iter: Box<dyn Iterator<Item = (f64, f64)> + '_> = match side {
+            Side::Buy => Box::new(self.asks_iter()),
+            Side::Sell => Box::new(self.bids_iter()),
         };
 
         let mut remaining = size;
         let mut total_cost = 0.0;
         let mut fills = Vec::new();
 
-        for (price, level_size) in &levels {
-            let fill = remaining.min(*level_size);
+        for (price, level_size) in iter {
+            let fill = remaining.min(level_size);
             total_cost += fill * price;
-            fills.push(Fill {
-                price: *price,
-                size: fill,
-            });
+            fills.push(Fill { price, size: fill });
             remaining -= fill;
             if remaining <= 0.0 {
                 break;
