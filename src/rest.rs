@@ -245,10 +245,7 @@ mod tests {
     #[test]
     fn builder_with_timeout() {
         // Just verify it doesn't panic
-        let client = OpinionClient::builder()
-            .timeout_secs(30)
-            .build()
-            .unwrap();
+        let client = OpinionClient::builder().timeout_secs(30).build().unwrap();
         assert_eq!(client.base_url(), DEFAULT_OPENAPI_BASE);
     }
 
@@ -288,10 +285,7 @@ mod tests {
 
     #[test]
     fn build_request_includes_api_key_header() {
-        let client = OpinionClient::builder()
-            .api_key("my-key")
-            .build()
-            .unwrap();
+        let client = OpinionClient::builder().api_key("my-key").build().unwrap();
         let req = client
             .build_request(Method::GET, "/order", Option::<&()>::None, true)
             .unwrap();
